@@ -94,3 +94,4 @@ langchain-huggingface
 newspaper3k
 lxml_html_clean
 yake
+torch
