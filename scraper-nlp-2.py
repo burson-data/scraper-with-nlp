@@ -14,6 +14,16 @@ import random
 from streamlit_option_menu import option_menu
 from newspaper.configuration import Configuration
 
+import sys
+import types
+
+import torch
+
+# Prevent Streamlit from scanning torch.classes
+if isinstance(torch.classes, types.ModuleType):
+    torch.classes.__path__ = []
+
+
 
 import newspaper
 from newspaper import Article
@@ -391,8 +401,9 @@ def load_models():
         tokenizer=pretrained_name
 )
     return summarizer, sentiment_nlp, tokenizer
-# Load models
-summarizer, sentiment_nlp, tokenizer = load_models()
+    
+# # Load models
+# summarizer, sentiment_nlp, tokenizer = load_models()
 
 # Sidebar Navigation
 with st.sidebar:
@@ -449,6 +460,8 @@ if menu == "Scrape":
                 st.session_state.nlp_done = False
 
                 if run_nlp_initial:
+                    # Load models
+                    summarizer, sentiment_nlp, tokenizer = load_models()
                     # with st.spinner("Menjalankan NLP..."):
                         st.session_state.scraped_df = enrich_with_nlp(df, selected_nlp=nlp_options)
                         st.session_state.nlp_done = True
