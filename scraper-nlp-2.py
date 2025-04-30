@@ -12,6 +12,7 @@ import re
 import locale
 import random
 from streamlit_option_menu import option_menu
+from newspaper.configuration import Configuration
 
 
 import newspaper
@@ -38,6 +39,10 @@ login(token=os.environ["HF_TOKEN"])
 URL='https://docs.google.com/spreadsheets/d/e/2PACX-1vQwxy1jmenWfyv49wzEwrp3gYE__u5JdhvVjn1c0zMUxDL6DTaU_t4Yo03qRlS4JaJWE3nK9_dIQMYZ/pub?output=csv'.format()
 media_db=pd.read_csv(URL).fillna(0)
 
+# Set config for newspaper
+config = Configuration()
+config.browser_user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+config.request_timeout = 20  # Optional: increase timeout
 
 
 # ================================
@@ -314,7 +319,7 @@ def enrich_with_nlp(df, selected_nlp=[]):
 
         url = row['Link']
         try:
-            article = Article(url, language="id")
+            article = Article(url, language="id", config=config)
             article.download()
             article.parse()
 
