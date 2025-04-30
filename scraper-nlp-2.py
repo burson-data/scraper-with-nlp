@@ -28,6 +28,12 @@ from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 
+# For Streamlit only, authenticate huggingface token
+from huggingface_hub import login
+import os
+
+login(token=os.environ["HF_TOKEN"])
+
 # Read media database
 URL='https://docs.google.com/spreadsheets/d/e/2PACX-1vQwxy1jmenWfyv49wzEwrp3gYE__u5JdhvVjn1c0zMUxDL6DTaU_t4Yo03qRlS4JaJWE3nK9_dIQMYZ/pub?output=csv'.format()
 media_db=pd.read_csv(URL).fillna(0)
