@@ -463,9 +463,9 @@ if menu == "Scrape":
                     # Load models
                     summarizer, sentiment_nlp, tokenizer = load_models()
                     # with st.spinner("Menjalankan NLP..."):
-                        st.session_state.scraped_df = enrich_with_nlp(df, selected_nlp=nlp_options)
-                        st.session_state.nlp_done = True
-                        st.success("NLP selesai!")
+                    st.session_state.scraped_df = enrich_with_nlp(df, selected_nlp=nlp_options)
+                    st.session_state.nlp_done = True
+                    st.success("NLP selesai!")
 
     # ✅ Show results if we have any in session state
     if "scraped_df" in st.session_state:
