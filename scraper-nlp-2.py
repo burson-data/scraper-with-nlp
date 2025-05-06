@@ -12,21 +12,12 @@ import re
 import locale
 import random
 from streamlit_option_menu import option_menu
-from newspaper.configuration import Configuration
-
-import sys
-import types
-
-import torch
-
-# Prevent Streamlit from scanning torch.classes
-if isinstance(torch.classes, types.ModuleType):
-    torch.classes.__path__ = []
-
+import io
 
 
 import newspaper
 from newspaper import Article
+from newspaper.configuration import Configuration
 from transformers import BertTokenizer, EncoderDecoderModel
 from transformers import pipeline
 from tqdm import tqdm
@@ -34,16 +25,25 @@ from tqdm import tqdm
 import yake
 import re
 
+## ONLINE STREAMLIT DEPENDENCIES ###
+# For online Streamlit only, authenticate huggingface token
+from huggingface_hub import login
+import os
+ 
+# login(token=os.environ["HF_TOKEN"])
+import sys
+import types
+import torch
+ 
+# Prevent Streamlit from scanning torch.classes
+if isinstance(torch.classes, types.ModuleType):
+     torch.classes.__path__ = []
+## ONLINE STREAMLIT DEPENDENCIES ###
+
 # Optional: Selenium only if selected
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
-
-# For Streamlit only, authenticate huggingface token
-from huggingface_hub import login
-import os
-
-login(token=os.environ["HF_TOKEN"])
 
 # Read media database
 URL='https://docs.google.com/spreadsheets/d/e/2PACX-1vQwxy1jmenWfyv49wzEwrp3gYE__u5JdhvVjn1c0zMUxDL6DTaU_t4Yo03qRlS4JaJWE3nK9_dIQMYZ/pub?output=csv'.format()
@@ -277,13 +277,6 @@ def get_news_data(method, start_date, end_date, keyword_query):
 
     base_url = f"https://www.google.com/search?q={encoded_query}&gl=id&hl=id&lr=lang_id&tbm=nws&num=10"
 
-    # if method == "BeautifulSoup":
-    #     return scrape_with_bs4(base_url, headers)
-    # elif method == "Selenium":
-    #     return scrape_with_selenium(base_url)
-    # else:
-    #     raise ValueError("Invalid method")
-
     # 🚀 First scrape:
     if method == "BeautifulSoup":
         news_df = scrape_with_bs4(base_url, headers)
@@ -311,7 +304,13 @@ def enrich_with_nlp(df, selected_nlp=[]):
         df['Keywords'] = ''
     if "Author" in selected_nlp:
         df['Author'] = ''
+    
+    # Load models
+    summarizer, sentiment_nlp, tokenizer = load_models()
+    # New column for tracking status
+    df['Status'] = ''
 
+    error_count = 0
     media_name_regex = r"^[A-Z][\w\s]+?\s[-:]\s[\w\s,]+(?:\d{4})?"
 
     kw_extractor = yake.KeywordExtractor(
@@ -337,13 +336,13 @@ def enrich_with_nlp(df, selected_nlp=[]):
             full_text = re.sub(media_name_regex, "", full_text)
 
             if not full_text:
-                continue
+                raise ValueError("Article text empty")
 
             if "Article Content" in selected_nlp:
                 df.at[idx, 'Article Content'] = full_text
 
             if "Summary" in selected_nlp:
-                input_text = full_text[:1024] if len(full_text) > 1024 else full_text
+                input_text = full_text[:1024]
                 inputs = tokenizer(input_text, return_tensors="pt", padding=True, truncation=True)
                 summary_ids = summarizer.generate(
                     inputs.input_ids,
@@ -357,7 +356,7 @@ def enrich_with_nlp(df, selected_nlp=[]):
                 df.at[idx, 'Summary'] = summary
 
             if "Sentiment" in selected_nlp:
-                sentiment_input = full_text[:512] if len(full_text) > 512 else full_text
+                sentiment_input = full_text[:512]
                 sentiment = sentiment_nlp(sentiment_input)[0]
                 df.at[idx, 'Sentiment'] = sentiment['label']
                 df.at[idx, 'SentimentScore'] = sentiment['score']
@@ -371,12 +370,34 @@ def enrich_with_nlp(df, selected_nlp=[]):
                 authors = article.authors
                 df.at[idx, 'Author'] = ", ".join(authors) if authors else "Unknown"
 
+            df.at[idx, 'Status'] = "OK"
+
         except Exception as e:
-            print(f"Failed processing {url}: {e}")
-            continue
+            error_count += 1
+            err_msg = str(e)
+            print(f"❌ Failed processing {url}: {err_msg}")
+
+            if "Article Content" in selected_nlp:
+                df.at[idx, 'Article Content'] = "ERROR"
+            if "Summary" in selected_nlp:
+                df.at[idx, 'Summary'] = "ERROR"
+            if "Sentiment" in selected_nlp:
+                df.at[idx, 'Sentiment'] = "ERROR"
+                df.at[idx, 'SentimentScore'] = 0.0
+            if "Keywords" in selected_nlp:
+                df.at[idx, 'Keywords'] = "ERROR"
+            if "Author" in selected_nlp:
+                df.at[idx, 'Author'] = "ERROR"
+            
+            df.at[idx, 'Status'] = f"ERROR: {err_msg[:80]}"
 
     progress_bar.empty()
     progress_text.empty()
+
+    if error_count > 0:
+        st.warning(f"⚠️ NLP selesai. {error_count} dari {total_articles} artikel gagal diproses.")
+    else:
+        st.success("✅ NLP selesai tanpa kesalahan.")
 
     return df
 
@@ -401,16 +422,14 @@ def load_models():
         tokenizer=pretrained_name
 )
     return summarizer, sentiment_nlp, tokenizer
-    
-# # Load models
-# summarizer, sentiment_nlp, tokenizer = load_models()
+
 
 # Sidebar Navigation
 with st.sidebar:
     menu = option_menu(
         menu_title = "Main Menu",
-        options=["Scrape", "Queue", "Scheduler", "How to use", "About"],
-        icons=["house", "list-check","clock", "filter-circle", "diagram-3"],
+        options=["How to use", "Scrape", "Queue", "NLP Tools", "Scheduler", "About"],
+        icons=["question-circle-fill", "search", "list-check", "tools", "clock", "diagram-3"],
         menu_icon="cast",  # optional
         default_index=0,  # optional
         styles={
@@ -460,12 +479,10 @@ if menu == "Scrape":
                 st.session_state.nlp_done = False
 
                 if run_nlp_initial:
-                    # Load models
-                    summarizer, sentiment_nlp, tokenizer = load_models()
                     # with st.spinner("Menjalankan NLP..."):
-                    st.session_state.scraped_df = enrich_with_nlp(df, selected_nlp=nlp_options)
-                    st.session_state.nlp_done = True
-                    st.success("NLP selesai!")
+                        st.session_state.scraped_df = enrich_with_nlp(df, selected_nlp=nlp_options)
+                        st.session_state.nlp_done = True
+                        # st.success("NLP selesai!")
 
     # ✅ Show results if we have any in session state
     if "scraped_df" in st.session_state:
@@ -497,7 +514,7 @@ if menu == "Scrape":
 
 # NEW - queue system by Naomi 24/04
 elif menu == "Queue":
-    st.title("🗓️ Multiple Keyword Scraper")
+    st.title("📋 Multiple Keyword Scraper")
     st.markdown("Scrape berita berdasarkan beberapa keyword sekaligus. Hasil file excel akan didownload secara otomatis.")
     if "query_queue" not in st.session_state:
         st.session_state.query_queue = []
@@ -574,7 +591,7 @@ elif menu == "Queue":
                     if run_nlp_queue:
                         with st.spinner("Menjalankan NLP..."):
                             result = enrich_with_nlp(result, selected_nlp=nlp_options)
-                            st.success("NLP selesai!")
+                            # st.success("NLP selesai!")
 
                     safe_keyword = re.sub(r"[^\w\s-]", "", item["keyword"]).replace(" ", "_")
                     filename = f"berita_{safe_keyword}_{item['start_date']}_{item['end_date']}.xlsx"
@@ -599,7 +616,62 @@ elif menu == "Queue":
         if st.button("🔄 Clear Antrian", use_container_width=True):
             st.rerun()
 
+# NEW: Separate NLP Processor
+elif menu == "NLP Tools":
+    st.title("NLP Processor")
+    st.markdown("Download konten artikel, penulis, dan analisa sentimen dari list URL yang diupload.")
+    st.markdown("⚠️ Harap pastikan bahwa URL ada dalam kolom bernama 'Link'")
 
+    with st.container(border=True):
+        uploaded_file = st.file_uploader("Upload Excel file", type=["xlsx"])
+
+        # Initialize df to None
+        df = None
+
+        if uploaded_file is not None:
+            try:
+                df = pd.read_excel(uploaded_file)
+                with st.expander("📂 Preview File", expanded=False):
+                    st.write(df.head())
+                # st.success("✅ File berhasil diupload.")
+            except Exception as e:
+                st.error(f"❌ Error loading file: {e}")
+                df = None
+        else:
+            df = None
+
+        st.divider()
+        
+        selected_nlp = st.multiselect(
+            "Pilih fitur NLP yang ingin dijalankan:",
+            ["Article Content", "Summary", "Sentiment", "Keywords", "Author"],
+            default=["Sentiment", "Author"]
+        )
+
+        run_nlp = False
+        if df is not None and selected_nlp:
+            run_nlp = st.button("Jalankan NLP pada file")
+
+    # Process and display results if button was clicked
+    if df is not None and selected_nlp and run_nlp:
+        processed_df = enrich_with_nlp(df, selected_nlp)
+        st.dataframe(processed_df.head())
+
+        # Save the processed dataframe to a BytesIO object (in-memory)
+        to_download = io.BytesIO()
+        processed_df.to_excel(to_download, index=False)
+        to_download.seek(0)
+
+        # Generate the filename with "nlp_processed" added to the original file name
+        filename = f"nlp_processed_{uploaded_file.name}"
+
+        # Provide the download button
+        st.download_button(
+            "📥 Download Excel",
+            data=to_download,
+            file_name=filename,
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 
 elif menu == "Scheduler":
     st.title("🗓️ Jadwal Scraping Otomatis")
@@ -697,7 +769,10 @@ elif menu == "About":
 **Release Note v1.0.2**
 - ✅ Full article text extraction
 - ✅ Penggunaan model sentiment & summarizer dari HuggingFace untuk klasifikasi
-- ✅ Penggunaan Yake untuk ekstraksi keywords                     
+- ✅ Penggunaan Yake untuk ekstraksi keywords
+
+**Release Note v1.0.3**
+- ✅ NLP Tools untuk mengekstrak author, etc. dari list link artikel                   
 ---
 
 **Made by**: Jay and Naomi ✨
