@@ -208,7 +208,7 @@ def scrape_with_bs4(base_url, headers=None):
             break
 
         page += 1
-        time.sleep(random.uniform(1.5, 25.0))  # Waktu tunggu lebih pendek, bisa disesuaikan
+        time.sleep(random.uniform(10.0, 50.0))  # Waktu tunggu lebih pendek, bisa disesuaikan
     #NEW: Convert to dataframe & join with database
     news_results = pd.DataFrame(news_results, columns=['Link', 'Judul', 'Snippet','Tanggal','Media'])
     news_results = news_results.merge(media_db, on='Media', how='left')
